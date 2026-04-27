@@ -1,5 +1,5 @@
 --[[
-    Script Desofuscado
+    Script Desofuscado com Auto Clicker e Hitbox Extender
     Interface Gráfica (GUI) com múltiplas abas para um executor Roblox.
 --]]
 
@@ -12,6 +12,7 @@ local CoreGui = game:GetService("CoreGui")
 local HttpService = game:GetService("HttpService")
 local VirtualUser = game:GetService("VirtualUser")
 local TeleportService = game:GetService("TeleportService")
+local Workspace = game:GetService("Workspace")
 
 -- Variáveis Globais e Estados
 local screenGui = Instance.new("ScreenGui")
@@ -41,11 +42,22 @@ local fovChangerEnabled = false
 local cFrameSaver = false
 local savedCFrame = nil
 
+-- ===== NOVAS VARIÁVEIS =====
+local autoClickerEnabled = false
+local autoClickerDelay = 0.05
+local autoClickerConnection = nil
+local autoClickerButton = nil
+local autoClickerTarget = nil  -- Para especificar um alvo (opcional)
+
+local hitboxEnabled = false
+local originalSizes = {}  -- Para armazenar tamanhos originais das partes
+local hitboxMultiplier = 2
+local hitboxSlider = nil
+
 -- Valores padrão
 local walkSpeedValue = 16
 local jumpPowerValue = 50
 local flySpeed = 1
-local hitboxMultiplier = 1
 local fovValue = 70
 local customFov = 70
 local fovTween = nil
@@ -57,20 +69,145 @@ local loopBringList = {}
 local savedPositions = {}
 local waypoints = {}
 
+-- ===== FUNÇÃO DO AUTO CLICKER =====
+local function SetupAutoClicker(state)
+    autoClickerEnabled = state
+    
+    if autoClickerConnection then
+        autoClickerConnection:Disconnect()
+        autoClickerConnection = nil
+    end
+    
+    if state then
+        autoClickerConnection = RunService.RenderStepped:Connect(function()
+            if autoClickerEnabled then
+                -- Clica no alvo específico se definido
+                if autoClickerTarget and autoClickerTarget:IsA("BasePart") then
+                    fireclickdetector(Mouse.Target:FindFirstChildWhichIsA("ClickDetector"))
+                end
+                -- Simula o clique do mouse
+                local VirtualInput = game:GetService("VirtualInputManager")
+                VirtualInput:SendMouseButtonEvent(Mouse.X, Mouse.Y, 0, true, game, 0)
+                wait(autoClickerDelay)
+                VirtualInput:SendMouseButtonEvent(Mouse.X, Mouse.Y, 0, false, game, 0)
+            end
+        end)
+    end
+end
+
+-- Função para atualizar o delay do auto clicker
+local function UpdateAutoClickerDelay(value)
+    autoClickerDelay = value
+    if autoClickerEnabled then
+        -- Reinicia o auto clicker com o novo delay
+        SetupAutoClicker(true)
+    end
+end
+
+-- ===== FUNÇÃO DO HITBOX EXTENDER MELHORADA =====
+local function SetupHitboxExtender(state)
+    hitboxEnabled = state
+    
+    if not Player.Character then return end
+    
+    if state then
+        -- Salva tamanhos originais antes de modificar
+        for _, part in ipairs(Player.Character:GetChildren()) do
+            if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+                originalSizes[part] = part.Size
+                part.Size = part.Size * hitboxMultiplier
+            end
+        end
+        
+        -- Conecta para novos membros do personagem (ex: ferramentas equipadas)
+        local characterAddedConnection
+        characterAddedConnection = Player.CharacterAdded:Connect(function(character)
+            wait(0.5)
+            if hitboxEnabled then
+                for _, part in ipairs(character:GetChildren()) do
+                    if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" and not originalSizes[part] then
+                        originalSizes[part] = part.Size
+                        part.Size = part.Size * hitboxMultiplier
+                    end
+                end
+            end
+        end)
+        
+        -- Armazena a conexão para limpar depois
+        if not hitboxExtenderConnection then
+            hitboxExtenderConnection = characterAddedConnection
+        end
+    else
+        -- Restaura tamanhos originais
+        for part, originalSize in pairs(originalSizes) do
+            if part and part.Parent then
+                part.Size = originalSize
+            end
+        end
+        originalSizes = {}
+        
+        -- Desconecta o evento de novo personagem
+        if hitboxExtenderConnection then
+            hitboxExtenderConnection:Disconnect()
+            hitboxExtenderConnection = nil
+        end
+    end
+end
+
+-- Função para atualizar o multiplicador da hitbox
+local function UpdateHitboxMultiplier(value)
+    hitboxMultiplier = value
+    
+    if hitboxEnabled and Player.Character then
+        -- Atualiza as partes atuais
+        for part, originalSize in pairs(originalSizes) do
+            if part and part.Parent then
+                part.Size = originalSize * hitboxMultiplier
+            end
+        end
+        
+        -- Adiciona novas partes que podem ter aparecido
+        for _, part in ipairs(Player.Character:GetChildren()) do
+            if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" and not originalSizes[part] then
+                originalSizes[part] = part.Size
+                part.Size = part.Size * hitboxMultiplier
+            end
+        end
+    end
+end
+
+-- ===== FUNÇÃO DO AUTO CLICKER COM ALVO ESPECÍFICO =====
+local function SetAutoClickerTarget()
+    local targetPart = Mouse.Target
+    if targetPart then
+        autoClickerTarget = targetPart
+        if autoClickerButton then
+            autoClickerButton.Text = "Auto Clicker: ON (Alvo: " .. targetPart.Name .. ")"
+        end
+        print("Auto Clicker alvo definido para: " .. targetPart.Name)
+    else
+        autoClickerTarget = nil
+        if autoClickerButton then
+            autoClickerButton.Text = "Auto Clicker: ON"
+        end
+        print("Auto Clicker alvo removido")
+    end
+end
+
 -- Função para criar GUI (Janela Principal)
 local function CreateMainGUI()
-    screenGui.Name = "KrnlHub"
+    screenGui.Name = "SuperHub"
     screenGui.Parent = CoreGui
     screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     screenGui.ResetOnSpawn = false
 
     mainFrame.Name = "Main"
     mainFrame.Parent = screenGui
-    mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
-    mainFrame.BorderColor3 = Color3.fromRGB(20, 20, 25)
+    mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+    mainFrame.BorderColor3 = Color3.fromRGB(15, 15, 20)
     mainFrame.BorderSizePixel = 1
-    mainFrame.Position = UDim2.new(0.5, -300, 0.5, -200)
-    mainFrame.Size = UDim2.new(0, 600, 0, 400)
+    mainFrame.Position = UDim2.new(0.5, -350, 0.5, -250)
+    mainFrame.Size = UDim2.new(0, 700, 0, 500)
     mainFrame.Active = true
     mainFrame.Draggable = false
     mainFrame.ClipsDescendants = false
@@ -78,17 +215,17 @@ local function CreateMainGUI()
     -- Top Bar (para arrastar)
     topBar.Name = "TopBar"
     topBar.Parent = mainFrame
-    topBar.BackgroundColor3 = Color3.fromRGB(45, 45, 50)
+    topBar.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
     topBar.BorderSizePixel = 0
-    topBar.Size = UDim2.new(1, 0, 0, 30)
+    topBar.Size = UDim2.new(1, 0, 0, 35)
 
     titleLabel.Name = "Title"
     titleLabel.Parent = topBar
     titleLabel.BackgroundTransparency = 1
     titleLabel.Position = UDim2.new(0, 10, 0, 0)
-    titleLabel.Size = UDim2.new(0, 200, 1, 0)
+    titleLabel.Size = UDim2.new(0, 250, 1, 0)
     titleLabel.Font = Enum.Font.GothamSemibold
-    titleLabel.Text = "Krnl Hub V1.0"
+    titleLabel.Text = "SuperHub V2.0 | Auto Clicker + Hitbox"
     titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
     titleLabel.TextSize = 14
     titleLabel.TextXAlignment = Enum.TextXAlignment.Left
@@ -96,7 +233,7 @@ local function CreateMainGUI()
     closeButton.Name = "Close"
     closeButton.Parent = topBar
     closeButton.BackgroundColor3 = Color3.fromRGB(255, 70, 70)
-    closeButton.Position = UDim2.new(1, -25, 0, 5)
+    closeButton.Position = UDim2.new(1, -25, 0, 7)
     closeButton.Size = UDim2.new(0, 20, 0, 20)
     closeButton.Font = Enum.Font.GothamBold
     closeButton.Text = "X"
@@ -107,7 +244,7 @@ local function CreateMainGUI()
     minimizeButton.Name = "Minimize"
     minimizeButton.Parent = topBar
     minimizeButton.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
-    minimizeButton.Position = UDim2.new(1, -50, 0, 5)
+    minimizeButton.Position = UDim2.new(1, -50, 0, 7)
     minimizeButton.Size = UDim2.new(0, 20, 0, 20)
     minimizeButton.Font = Enum.Font.GothamBold
     minimizeButton.Text = "-"
@@ -160,17 +297,17 @@ local function CreateMainGUI()
     -- Tabs (Aba principal)
     tabHolder.Name = "TabHolder"
     tabHolder.Parent = mainFrame
-    tabHolder.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
+    tabHolder.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
     tabHolder.BorderSizePixel = 0
-    tabHolder.Position = UDim2.new(0, 0, 0, 30)
-    tabHolder.Size = UDim2.new(0, 150, 1, -30)
+    tabHolder.Position = UDim2.new(0, 0, 0, 35)
+    tabHolder.Size = UDim2.new(0, 180, 1, -35)
 
     contentFrame.Name = "Content"
     contentFrame.Parent = mainFrame
-    contentFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
+    contentFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
     contentFrame.BorderSizePixel = 0
-    contentFrame.Position = UDim2.new(0, 150, 0, 30)
-    contentFrame.Size = UDim2.new(1, -150, 1, -30)
+    contentFrame.Position = UDim2.new(0, 180, 0, 35)
+    contentFrame.Size = UDim2.new(1, -180, 1, -35)
 
     return screenGui, mainFrame, tabHolder, contentFrame
 end
@@ -180,9 +317,9 @@ local function CreateTab(name, parent)
     local tabButton = Instance.new("TextButton")
     tabButton.Name = name.."Tab"
     tabButton.Parent = parent
-    tabButton.BackgroundColor3 = Color3.fromRGB(45, 45, 50)
+    tabButton.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
     tabButton.BorderSizePixel = 0
-    tabButton.Size = UDim2.new(1, 0, 0, 35)
+    tabButton.Size = UDim2.new(1, 0, 0, 40)
     tabButton.Font = Enum.Font.GothamSemibold
     tabButton.Text = name
     tabButton.TextColor3 = Color3.fromRGB(200, 200, 200)
@@ -201,7 +338,7 @@ local function CreateTab(name, parent)
     local uiList = Instance.new("UIListLayout")
     uiList.Parent = tabContent
     uiList.SortOrder = Enum.SortOrder.LayoutOrder
-    uiList.Padding = UDim.new(0, 5)
+    uiList.Padding = UDim.new(0, 8)
 
     tabButton.MouseButton1Click:Connect(function()
         for _, child in pairs(contentFrame:GetChildren()) do
@@ -211,11 +348,11 @@ local function CreateTab(name, parent)
         end
         for _, child in pairs(parent:GetChildren()) do
             if child:IsA("TextButton") then
-                child.BackgroundColor3 = Color3.fromRGB(45, 45, 50)
+                child.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
                 child.TextColor3 = Color3.fromRGB(200, 200, 200)
             end
         end
-        tabButton.BackgroundColor3 = Color3.fromRGB(60, 60, 65)
+        tabButton.BackgroundColor3 = Color3.fromRGB(55, 55, 60)
         tabButton.TextColor3 = Color3.fromRGB(255, 255, 255)
         tabContent.Visible = true
     end)
@@ -226,9 +363,9 @@ end
 local function CreateButton(parent, text, callback, order)
     local button = Instance.new("TextButton")
     button.Parent = parent
-    button.BackgroundColor3 = Color3.fromRGB(55, 55, 60)
+    button.BackgroundColor3 = Color3.fromRGB(50, 50, 55)
     button.BorderSizePixel = 0
-    button.Size = UDim2.new(1, -10, 0, 30)
+    button.Size = UDim2.new(1, -10, 0, 35)
     button.Position = UDim2.new(0, 5, 0, 0)
     button.Font = Enum.Font.Gotham
     button.Text = text
@@ -244,7 +381,7 @@ local function CreateToggle(parent, text, callback, order, initialState)
     local frame = Instance.new("Frame")
     frame.Parent = parent
     frame.BackgroundTransparency = 1
-    frame.Size = UDim2.new(1, -10, 0, 30)
+    frame.Size = UDim2.new(1, -10, 0, 35)
     frame.LayoutOrder = order
 
     local label = Instance.new("TextLabel")
@@ -259,8 +396,8 @@ local function CreateToggle(parent, text, callback, order, initialState)
 
     local toggleButton = Instance.new("TextButton")
     toggleButton.Parent = frame
-    toggleButton.Position = UDim2.new(0.7, 0, 0.5, -12)
-    toggleButton.Size = UDim2.new(0, 50, 0, 24)
+    toggleButton.Position = UDim2.new(0.7, 0, 0.5, -14)
+    toggleButton.Size = UDim2.new(0, 60, 0, 28)
     toggleButton.BackgroundColor3 = initialState and Color3.fromRGB(0, 200, 0) or Color3.fromRGB(150, 50, 50)
     toggleButton.BorderSizePixel = 0
     toggleButton.Font = Enum.Font.GothamBold
@@ -284,7 +421,7 @@ local function CreateSlider(parent, text, min, max, default, callback, order)
     local frame = Instance.new("Frame")
     frame.Parent = parent
     frame.BackgroundTransparency = 1
-    frame.Size = UDim2.new(1, -10, 0, 50)
+    frame.Size = UDim2.new(1, -10, 0, 55)
     frame.LayoutOrder = order
 
     local label = Instance.new("TextLabel")
@@ -292,7 +429,7 @@ local function CreateSlider(parent, text, min, max, default, callback, order)
     label.BackgroundTransparency = 1
     label.Size = UDim2.new(1, 0, 0, 20)
     label.Font = Enum.Font.Gotham
-    label.Text = text .. ": " .. tostring(default)
+    label.Text = text .. ": " .. string.format("%.2f", default)
     label.TextColor3 = Color3.fromRGB(255, 255, 255)
     label.TextSize = 13
     label.TextXAlignment = Enum.TextXAlignment.Left
@@ -324,7 +461,7 @@ local function CreateSlider(parent, text, min, max, default, callback, order)
         value = val
         fill.Size = UDim2.new((val - min) / (max - min), 0, 1, 0)
         drag.Position = UDim2.new((val - min) / (max - min), -10, 0.5, -10)
-        label.Text = text .. ": " .. string.format("%.1f", val)
+        label.Text = text .. ": " .. string.format("%.2f", val)
         callback(val)
     end
 
@@ -523,12 +660,13 @@ local mainContent = contentFrame
 
 -- Criando as Abas
 local mainTab = CreateTab("Main", mainTabs)
+local combatTab = CreateTab("Combat", mainTabs)  -- Nova aba para combate
 local playersTab = CreateTab("Players", mainTabs)
 local visualsTab = CreateTab("Visuals", mainTabs)
 local worldTab = CreateTab("World", mainTabs)
 local settingsTab = CreateTab("Settings", mainTabs)
 
--- Preenchendo a Aba Main
+-- ===== PREENCHENDO A ABA MAIN =====
 CreateButton(mainTab, "Infinite Yield (FE)", function()
     loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))()
 end, 1)
@@ -554,7 +692,47 @@ end, 4)
 CreateButton(mainTab, "Server Hop", ServerHop, 5)
 CreateButton(mainTab, "Rejoin", Rejoin, 6)
 
--- Preenchendo a Aba Players
+-- ===== PREENCHENDO A ABA COMBAT (NOVO) =====
+-- AUTO CLICKER
+local autoClickerFrame, getAutoClickerState = CreateToggle(combatTab, "Auto Clicker", function(state)
+    SetupAutoClicker(state)
+end, 1, false)
+autoClickerButton = autoClickerFrame:FindFirstChildWhichIsA("TextButton")
+
+CreateSlider(combatTab, "Auto Clicker Delay (segundos)", 0.01, 1, 0.05, function(value)
+    UpdateAutoClickerDelay(value)
+end, 2)
+
+CreateButton(combatTab, "Set Auto Clicker Target (Mouse over object)", function()
+    SetAutoClickerTarget()
+end, 3)
+
+CreateButton(combatTab, "Clear Auto Clicker Target", function()
+    autoClickerTarget = nil
+    if autoClickerButton then
+        autoClickerButton.Text = "Auto Clicker: ON"
+    end
+    print("Auto Clicker alvo removido")
+end, 4)
+
+-- HITBOX EXTENDER
+local hitboxFrame, getHitboxState = CreateToggle(combatTab, "Hitbox Extender", function(state)
+    SetupHitboxExtender(state)
+end, 5, false)
+
+hitboxSlider = CreateSlider(combatTab, "Hitbox Multiplier", 1, 10, 2, function(value)
+    UpdateHitboxMultiplier(value)
+end, 6)
+
+CreateButton(combatTab, "Reset Hitboxes", function()
+    if hitboxEnabled then
+        SetupHitboxExtender(false)
+        wait(0.1)
+        SetupHitboxExtender(true)
+    end
+end, 7)
+
+-- ===== PREENCHENDO A ABA PLAYERS =====
 local playerList = Instance.new("ScrollingFrame")
 playerList.Parent = playersTab
 playerList.Size = UDim2.new(1, 0, 0.6, 0)
@@ -577,22 +755,22 @@ local function RefreshPlayerList()
         if player ~= Player then
             local button = Instance.new("TextButton")
             button.Parent = playerList
-            button.Size = UDim2.new(1, -10, 0, 30)
+            button.Size = UDim2.new(1, -10, 0, 35)
             button.Position = UDim2.new(0, 5, 0, y)
-            button.BackgroundColor3 = Color3.fromRGB(55, 55, 60)
+            button.BackgroundColor3 = Color3.fromRGB(50, 50, 55)
             button.Text = player.Name
             button.Font = Enum.Font.Gotham
             button.TextColor3 = Color3.fromRGB(255, 255, 255)
             button.TextSize = 13
             button.BorderSizePixel = 0
-            y = y + 35
+            y = y + 40
             
             local menu = Instance.new("Frame")
             menu.Parent = button
-            menu.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
+            menu.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
             menu.BorderSizePixel = 0
-            menu.Position = UDim2.new(1, 0, 0, 0)
-            menu.Size = UDim2.new(0, 100, 0, 90)
+            menu.Position = UDim2.new(0, 0, 1, 0)
+            menu.Size = UDim2.new(1, 0, 0, 120)
             menu.Visible = false
             menu.ZIndex = 2
             
@@ -602,7 +780,7 @@ local function RefreshPlayerList()
             tpButton.Text = "Teleport"
             tpButton.Font = Enum.Font.Gotham
             tpButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-            tpButton.BackgroundColor3 = Color3.fromRGB(50, 50, 55)
+            tpButton.BackgroundColor3 = Color3.fromRGB(45, 45, 50)
             tpButton.BorderSizePixel = 0
             tpButton.MouseButton1Click:Connect(function()
                 TeleportToPlayer(player)
@@ -616,7 +794,7 @@ local function RefreshPlayerList()
             bringButton.Text = "Bring"
             bringButton.Font = Enum.Font.Gotham
             bringButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-            bringButton.BackgroundColor3 = Color3.fromRGB(50, 50, 55)
+            bringButton.BackgroundColor3 = Color3.fromRGB(45, 45, 50)
             bringButton.BorderSizePixel = 0
             bringButton.MouseButton1Click:Connect(function()
                 BringPlayer(player)
@@ -630,7 +808,7 @@ local function RefreshPlayerList()
             loopBringButton.Text = "Loop Bring"
             loopBringButton.Font = Enum.Font.Gotham
             loopBringButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-            loopBringButton.BackgroundColor3 = Color3.fromRGB(50, 50, 55)
+            loopBringButton.BackgroundColor3 = Color3.fromRGB(45, 45, 50)
             loopBringButton.BorderSizePixel = 0
             loopBringButton.MouseButton1Click:Connect(function()
                 if loopBringList[player] then
@@ -649,6 +827,22 @@ local function RefreshPlayerList()
                 menu.Visible = false
             end)
             
+            local killButton = Instance.new("TextButton")
+            killButton.Parent = menu
+            killButton.Position = UDim2.new(0, 0, 0, 90)
+            killButton.Size = UDim2.new(1, 0, 0, 30)
+            killButton.Text = "Kill"
+            killButton.Font = Enum.Font.Gotham
+            killButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+            killButton.BackgroundColor3 = Color3.fromRGB(45, 45, 50)
+            killButton.BorderSizePixel = 0
+            killButton.MouseButton1Click:Connect(function()
+                if player.Character and player.Character:FindFirstChild("Humanoid") then
+                    player.Character.Humanoid.Health = 0
+                end
+                menu.Visible = false
+            end)
+            
             button.MouseButton1Click:Connect(function()
                 menu.Visible = not menu.Visible
             end)
@@ -659,7 +853,7 @@ end
 
 CreateButton(playersTab, "Refresh Players", RefreshPlayerList, 1)
 
--- Preenchendo a Aba Visuals
+-- ===== PREENCHENDO A ABA VISUALS =====
 CreateToggle(visualsTab, "Highlight Players", function(state)
     SetupESP(state)
 end, 1, false)
@@ -702,29 +896,7 @@ CreateToggle(visualsTab, "Infinite Jump", function(state)
     InfiniteJump(state)
 end, 9, false)
 
-CreateToggle(visualsTab, "Hitbox Extender", function(state)
-    hitboxMultiplier = state and 5 or 1
-    if Player.Character then
-        for _, part in ipairs(Player.Character:GetChildren()) do
-            if part:IsA("BasePart") then
-                part.Size = part.Size * hitboxMultiplier
-            end
-        end
-    end
-end, 10, false)
-
-CreateSlider(visualsTab, "Hitbox Size", 1, 10, 1, function(value)
-    hitboxMultiplier = value
-    if Player.Character then
-        for _, part in ipairs(Player.Character:GetChildren()) do
-            if part:IsA("BasePart") then
-                part.Size = part.Size * hitboxMultiplier
-            end
-        end
-    end
-end, 11)
-
--- Preenchendo a Aba World
+-- ===== PREENCHENDO A ABA WORLD =====
 CreateButton(worldTab, "Kick All", function()
     for _, player in ipairs(game:GetService("Players"):GetPlayers()) do
         if player ~= Player then
@@ -761,7 +933,7 @@ CreateButton(worldTab, "Loop Delete Parts", function()
     end)()
 end, 3)
 
--- Preenchendo a Aba Settings
+-- ===== PREENCHENDO A ABA SETTINGS =====
 CreateButton(settingsTab, "Destroy GUI", function()
     screenGui:Destroy()
 end, 1)
@@ -781,3 +953,5 @@ end, 2)
 RefreshPlayerList()
 game:GetService("Players").PlayerAdded:Connect(RefreshPlayerList)
 game:GetService("Players").PlayerRemoving:Connect(RefreshPlayerList)
+
+print("Script carregado com sucesso! Aba 'Combat' adicionada com Auto Clicker e Hitbox Extender!")
